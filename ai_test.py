@@ -238,7 +238,7 @@ if st.session_state.current_stage == "selection":
                 
                 try:
                     response = client.chat.completions.create(
-                        model="grok-2-latest", # En son model
+                        model="grok-4-1-fast-reasoning", # En son model
                         messages=[
                             {"role": "system", "content": system_prompt},
                             {"role": "user", "content": user_prompt}
@@ -412,3 +412,4 @@ elif st.session_state.current_stage == "report":
 
         except Exception as e:
             st.error(f"Rapor oluşturulurken hata: {e}")
+
