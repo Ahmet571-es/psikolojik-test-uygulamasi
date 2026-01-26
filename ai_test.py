@@ -1,17 +1,80 @@
 import streamlit as st
 import json
 import matplotlib.pyplot as plt
+import numpy as np
 from openai import OpenAI
 import os
 
-# --- API ANAHTARI YÖNETİMİ (TEK BLOK, HEM LOKAL HEM BULUT UYUMLU) ---
+# --- 1. SAYFA KONFİGÜRASYONU VE STİL (PROFESYONEL UI) ---
+st.set_page_config(
+    page_title="Balaban Neuro-Psych | Gelişmiş Analiz",
+    page_icon="🧠",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# Özel CSS: Modern, temiz ve okunabilir bir arayüz için
+st.markdown("""
+<style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap');
+    
+    html, body, [class*="css"] {
+        font-family: 'Inter', sans-serif;
+    }
+    
+    .main-header {
+        font-size: 2.5rem;
+        color: #1E293B;
+        font-weight: 700;
+        text-align: center;
+        margin-bottom: 1rem;
+    }
+    
+    .sub-header {
+        font-size: 1.2rem;
+        color: #64748B;
+        text-align: center;
+        margin-bottom: 2rem;
+    }
+    
+    .question-card {
+        background-color: #ffffff;
+        padding: 2rem;
+        border-radius: 12px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+        margin-bottom: 1.5rem;
+        border-left: 5px solid #3B82F6;
+    }
+    
+    .report-section {
+        background-color: #F8FAFC;
+        padding: 1.5rem;
+        border-radius: 10px;
+        margin-bottom: 1rem;
+        border: 1px solid #E2E8F0;
+    }
+    
+    .highlight {
+        color: #2563EB;
+        font-weight: 600;
+    }
+    
+    /* Streamlit butonlarını özelleştirme */
+    div.stButton > button {
+        width: 100%;
+        border-radius: 8px;
+        height: 3em;
+        font-weight: 600;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# --- 2. API YÖNETİMİ ---
 GROK_API_KEY = None
 
-# 1. Streamlit Cloud Secrets (bulutta çalışırken öncelikli)
 if "GROK_API_KEY" in st.secrets:
     GROK_API_KEY = st.secrets["GROK_API_KEY"]
 else:
-    # 2. Lokal .env dosyası (bilgisayarda test ederken)
     try:
         from dotenv import load_dotenv
         load_dotenv()
@@ -19,334 +82,333 @@ else:
     except:
         pass
 
-# Tek kontrol ve mesaj
-if not GROK_API_KEY:
-    st.error("⚠️ GROK_API_KEY bulunamadı! Streamlit Cloud 'Secrets' kısmına veya lokal .env dosyasına ekleyin.")
-    st.stop()
+# Sidebar: API Durumu ve Hakkında
+with st.sidebar:
+    st.image("https://cdn-icons-png.flaticon.com/512/2040/2040504.png", width=80)
+    st.markdown("### 🧠 Balaban Neuro-Psych")
+    st.markdown("---")
+    if not GROK_API_KEY:
+        st.error("🔴 API Bağlantısı Yok")
+        st.warning("Lütfen API anahtarınızı .env dosyasına veya Secrets alanına ekleyin.")
+        st.stop()
+    else:
+        st.success("🟢 Sistem Çevrimiçi")
+    
+    st.info("""
+    **Sistem Mimarisi:**
+    Bu uygulama, klinik psikoloji literatürünü tarayan **Grok-2** (Beta) yapay zeka modelini kullanır. 
+    
+    **Metodoloji:**
+    Sorular, psikometrik geçerlilik esas alınarak dinamik üretilir.
+    """)
 
-st.success("✅ Grok API hazır!")
-
-# OpenAI client (Grok için)
 client = OpenAI(
     api_key=GROK_API_KEY,
     base_url="https://api.x.ai/v1"
 )
 
-# Test listesi
+# --- 3. TEST VERİTABANI VE İÇERİK ---
 TESTLER = {
-    "Big Five Kişilik Testi": "Big Five Kişilik Testi",
-    "MBTI Temelli Kişilik Tipi Testi": "MBTI Temelli Kişilik Tipi Testi",
-    "Çoklu Zeka Testi (Gardner temelli)": "Çoklu Zeka Testi (Gardner temelli)",
-    "Seçici Dikkat Testi (D2 ilhamlı)": "Seçici Dikkat Testi (D2 ilhamlı)",
-    "Sürekli Dikkat Testi (MOXO ilhamlı)": "Sürekli Dikkat Testi (MOXO ilhamlı)",
-    "Yetişkin DEHB Tarama Testi (DIVA ilhamlı)": "Yetişkin DEHB Tarama Testi (DIVA ilhamlı)",
-    "Duygusal Zeka (EQ) Testi": "Duygusal Zeka (EQ) Testi",
-    "Karakter Güçleri Testi (VIA 24 güç)": "Karakter Güçleri Testi (VIA 24 güç)",
-    "Bağlanma Stili Testi": "Bağlanma Stili Testi",
-    "Enneagram Kişilik Tipi Testi": "Enneagram Kişilik Tipi Testi (9 tip + kanatlar)",
-    "Pozitif Psikoloji ve İyi Oluş Testi": "Pozitif Psikoloji ve İyi Oluş Testi (PERMA + VIA + Flourishing)"
+    "Big Five (OCEAN)": "Kişiliğin 5 temel boyutunu (Açıklık, Sorumluluk, Dışadönüklük, Uyumluluk, Nevrotiklik) analiz eden altın standart.",
+    "MBTI Tipi (Fonksiyonel)": "Bilişsel fonksiyonlarınızı (Ni, Ne, Ti, Te vb.) analiz ederek 16 tipten hangisine yakın olduğunuzu belirler.",
+    "Çoklu Zeka (Gardner)": "Sözel, sayısal, görsel, müzikal gibi 8 farklı zeka türündeki potansiyelinizi haritalandırır.",
+    "Duygusal Zeka (EQ-i)": "Duyguları tanıma, yönetme ve empati yeteneğinizi ölçen klinik tabanlı analiz.",
+    "Enneagram & Kanatlar": "Temel korku ve arzularınıza dayalı 9 kişilik tipinden hangisi olduğunuzu ve gelişim yollarınızı bulur.",
+    "Karakter Güçleri (VIA)": "Sizi özgün kılan 24 karakter gücünden (Cesaret, Bilgelik, Adalet vb.) hangilerinin imza güçleriniz olduğunu keşfeder.",
+    "Bağlanma Stilleri": "İlişkilerdeki güven, kaygı ve kaçınma dinamiklerinizi analiz eder (Güvenli, Kaygılı, Kaçıngan).",
+    "Yetişkin DEHB Tarama": "Dikkat eksikliği ve hiperaktivite belirtilerini nöropsikolojik çerçevede tarar (Tanı koymaz, farkındalık sağlar).",
+    "Tükenmişlik (Burnout)": "Mesleki ve duygusal tükenmişlik seviyenizi ölçer.",
+    "Liderlik Stili Analizi": "Yönetim ve liderlik potansiyelinizi ve tarzınızı (Dönüştürücü, Hizmetkar vb.) analiz eder."
 }
 
-# Tüm testlerin çok detaylı akademik açıklamaları
-TEST_ACIKLAMALARI = {
-    "Big Five Kişilik Testi": """
-**Big Five Kişilik Testi (OCEAN Modeli)**  
-**Bilimsel Temel ve Köken:** Lexical hipotezden türetilmiş, Allport & Odbert (1936)'tan başlayarak Goldberg (1990) ve Costa & McCrae (1992) tarafından NEO-PI-R ile standardize edilmiş. Binlerce kültürlerarası çalışma (McCrae & Costa, 2008) ile en güvenilir kişilik modeli kabul edilir.  
-**Alt Boyutlar ve Detaylar:**  
-- Açıklık: Yeni deneyimlere açıklık, hayal gücü, estetik hassasiyet, liberal değerler.  
-- Sorumluluk: Düzenlilik, öz disiplin, planlama, güvenilirlik.  
-- Dışadönüklük: Sosyal etkileşim, heyecan arayışı, pozitif duygular.  
-- Uyumluluk: Empati, altruizm, işbirliği, güven.  
-- Duygusal Dengelilik: Kaygı, depresyon ve öfkeye karşı direnç (Neuroticism ters skorlanır).  
-**Akademik Geçerlilik:** Yüksek test-retest güvenilirliği (α > .80), öngörü gücü (iş performansı, ilişki tatmini, sağlık sonuçları).  
-**Uygulamamızda:** 50+ derin akademik madde, percentile karşılaştırması, davranış tahminleri ve gelişim planı içeren klinik üstü rapor.
-    """,
-    "MBTI Temelli Kişilik Tipi Testi": """
-**MBTI Temelli Kişilik Tipi Testi**  
-**Bilimsel Temel:** Carl Jung'un Psikolojik Tipler (1921) kitabından, Isabel Myers ve Katharine Briggs tarafından geliştirilmiş (1940'lar). Modern versiyonlar fonksiyon yığını (Ni, Se vb.) içerir.  
-**Alt Boyutlar:** E/I (Enerji kaynağı), S/N (Bilgi toplama), T/F (Karar verme), J/P (Yaşam tarzı) → 16 tip.  
-**Akademik Geçerlilik:** Big Five ile yüksek korelasyon, kariyer danışmanlığında yaygın (CPP, Inc.).  
-**Uygulamamızda:** Sürekli ölçüm, fonksiyon gelişimi tavsiyeleri, tip + ikincil tip analizi, derin içgörü raporu.
-    """,
-    "Çoklu Zeka Testi (Gardner temelli)": """
-**Çoklu Zeka Testi**  
-**Bilimsel Temel:** Howard Gardner, Frames of Mind (1983, revize 2011). Geleneksel g faktörüne karşı, nörobilim ve antropolojik kanıtlarla 8-9 bağımsız zeka önerir.  
-**Zekâ Türleri Detayları:**  
-- Dilsel, Mantıksal-Matematiksel, Bedensel-Kinestetik, Müzikal, Uzamsal, Kişilerarası, İçsel, Doğacı, Varoluşsal.  
-**Akademik Geçerlilik:** Eğitim psikolojisinde etkili, öğrenme stilleri üzerine çalışmalarla desteklenir.  
-**Uygulamamızda:** Baskın/ikincil zekâlar tespiti, kariyer ve öğrenme stili önerileriyle zengin rapor.
-    """,
-    "Seçici Dikkat Testi (D2 ilhamlı)": """
-**Seçici Dikkat Testi (D2 İlhamlı)**  
-**Bilimsel Temel:** Rolf Brickenkamp'ın D2 Testi (1962, revize 2003), nöropsikolojide standart seçici dikkat ölçümü.  
-**Ölçtüğü Detaylar:** Görsel tarama hızı, doğruluk, konsantrasyon altında performans, distraktör direnci.  
-**Akademik Geçerlilik:** Klinik tanı için yüksek güvenilirlik.  
-**Uygulamamızda:** Şıklı senaryolarla simülasyon, dikkat geliştirme egzersizleri içeren rapor.
-    """,
-    "Sürekli Dikkat Testi (MOXO ilhamlı)": """
-**Sürekli Dikkat Testi (MOXO İlhamlı)**  
-**Bilimsel Temel:** MOXO-CPT (Berger et al., 2013), sürekli performans testi.  
-**Ölçtüğü İndeksler:** Dikkat, Zamanlama, Dürtüsellik, Hiperaktivite.  
-**Akademik Geçerlilik:** DEHB tanısında yüksek sensitivite/specificity.  
-**Uygulamamızda:** Distraktör simülasyonu, strateji ve farkındalık raporu.
-    """,
-    "Yetişkin DEHB Tarama Testi (DIVA ilhamlı)": """
-**Yetişkin DEHB Tarama Testi**  
-**Bilimsel Temel:** DIVA 5.0 (Kooij et al., 2019), DSM-5 kriterlerine dayalı.  
-**Ölçtüğü:** 18 kriter (dikkat eksikliği + hiperaktivite/dürtüsellik).  
-**Uygulamamızda:** Farkındalık amaçlı, profesyonel yönlendirme içeren derin rapor.
-    """,
-    "Duygusal Zeka (EQ) Testi": """
-**Duygusal Zeka Testi**  
-**Bilimsel Temel:** Mayer-Salovey-Caruso (MSCEIT, 2002), Goleman (1995).  
-**Alt Boyutlar:** Duygu algısı, kullanım, anlama, yönetim.  
-**Uygulamamızda:** Senaryo temelli, pratik egzersizlerle rapor.
-    """,
-    "Karakter Güçleri Testi (VIA 24 güç)": """
-**Karakter Güçleri Testi**  
-**Bilimsel Temel:** Peterson & Seligman (2004), VIA Enstitüsü.  
-**Ölçtüğü:** 24 imza güç (6 erdem altında).  
-**Uygulamamızda:** Güç kullanımı egzersizleri, pozitif müdahale planı.
-    """,
-    "Bağlanma Stili Testi": """
-**Bağlanma Stili Testi**  
-**Bilimsel Temel:** Bowlby-Ainsworth (1969-80), Bartholomew (1991).  
-**Stiller:** Güvenli, Kaygılı, Kaçıngan-Korkulu, Kaçıngan-Reddedici.  
-**Uygulamamızda:** ECR-R temelli ilişki dinamikleri analizi.
-    """,
-    "Enneagram Kişilik Tipi Testi": """
-**Enneagram Kişilik Tipi Testi**  
-**Bilimsel Temel:** Riso-Hudson (1990’lar), Big Five korelasyonları.  
-**Detaylı Tip + Kanat + Sağlık Seviyeleri:** 9 tip (1 Mükemmeliyetçi - 9 Barışçı), kanatlar (w9/w2 vb.), korku/arzu, büyüme/stres yolları.  
-**Uygulamamızda:** Tip + kanat + sağlık seviyesi tespiti, derin gelişim raporu.
-    """,
-    "Pozitif Psikoloji ve İyi Oluş Testi": """
-**Pozitif Psikoloji ve İyi Oluş Testi**  
-**Bilimsel Temel:** Martin Seligman (1998-2011), Csikszentmihalyi akış teorisi.  
-**PERMA Modeli Detaylı Açıklama:**  
-- **P - Positive Emotion:** Fredrickson broaden-and-build (2001).  
-- **E - Engagement:** Csikszentmihalyi (1990).  
-- **R - Relationships:** Sosyal bağlar.  
-- **M - Meaning:** Frankl etkisi.  
-- **A - Accomplishment:** Grit (Duckworth, 2007).  
-**Ek Modeller:** VIA 24 güç, Flourishing (Diener 2010), resilience, optimism.  
-**Uygulamamızda:** 60+ madde, PERMA + imza güçler + adım adım müdahale planı.
-    """
-}
+# --- 4. YARDIMCI FONKSİYONLAR ---
 
-# Sayfa başlığı
-st.markdown("# 🧠 BALABAN KOÇLUK – Ultimate Psikolojik Test Uygulaması")
-st.markdown("**Aşağıdan istediğiniz testi seçin, detaylı akademik açıklamayı okuyun ve testi başlatın.**")
+def clean_json_string(json_string):
+    """LLM bazen JSON'ı markdown blokları içine yazar, bunu temizler."""
+    if "```json" in json_string:
+        json_string = json_string.split("```json")[1].split("```")[0]
+    elif "```" in json_string:
+        json_string = json_string.split("```")[1].split("```")[0]
+    return json_string.strip()
 
-# Test seçimi
-test_secimi = st.selectbox(
-    "UYGULAMAK İSTEDİĞİNİZ TESTİ SEÇİNİZ",
-    options=["-- Lütfen bir test seçin --"] + list(TESTLER.keys())
-)
+def create_radar_chart(labels, stats, title):
+    """Matplotlib ile profesyonel Radar (Örümcek) Grafiği çizer."""
+    try:
+        labels = np.array(labels)
+        stats = np.array(stats)
 
-# Açıklama gösterimi
-if test_secimi and not test_secimi.startswith("--"):
-    st.markdown(f"## {test_secimi} - Detaylı Akademik Açıklama")
-    st.markdown(TEST_ACIKLAMALARI.get(test_secimi, "Açıklama bulunamadı."))
-else:
-    st.info("Lütfen yukarıdan bir test seçerek detaylı akademik açıklamayı okuyun.")
-
-# Test başlatma
-if test_secimi and not test_secimi.startswith("--"):
-    if st.button("🚀 Testi Başlat", type="primary"):
-        with st.spinner("50 derin akademik soru Grok-4 ile üretiliyor... Lütfen bekleyin (10-30 saniye sürebilir)"):
-            soru_prompt = f"""
-            Sen akademik psikoloji profesörüsün. Dünyanın en iyi akademik psikoloji profesörü sensin. {test_secimi} için tam 50 adet üst düzey bilimsel, orijinal soru üret.
-            Gereksinimler:
-            - Her soru: Seçilen teste o testin konusuna göre; mükemmel, derin ve ayrıntılı, eşsiz, akademik kalitede, çok üst seviye sorulardan oluşsun.
-            - Her soru 5 şıklı Likert ölçeği.
-            - Kusursuz, doğal ve akıcı Türkçe (devrik cümle asla yok).
-            - En az %40 ters puanlanan madde (sosyal desirability bias önleme).
-            - 10+ kontrol/tekrar sorusu.
-            - HER SORUDA 'reverse_scored' ALANI ZORUNLU (true/false).
-            - Çıktı KESİNLİKLE sadece şu JSON olsun:
-            {{
-              "questions": [
-                {{"id": 1, "text": "Soru metni burada.", "reverse_scored": false}},
-                ...
-              ]
-            }}
-            JSON dışında hiçbir şey yazma!
-            """
-            try:
-                response = client.chat.completions.create(
-                    model="grok-4",
-                    messages=[
-                        {"role": "system", "content": "Sadece tam JSON üret, ekstra hiçbir şey yazma."},
-                        {"role": "user", "content": soru_prompt}
-                    ],
-                    temperature=0.3,
-                    response_format={"type": "json_object"}
-                )
-                questions_data = json.loads(response.choices[0].message.content)
-                questions = questions_data.get("questions", [])
-                
-                if len(questions) == 0:
-                    st.error("Soru üretimi başarısız oldu. Lütfen tekrar deneyin.")
-                    st.stop()
-                    
-            except Exception as e:
-                st.error(f"Soru üretimi sırasında hata: {e}")
-                st.stop()
-
-        st.session_state.questions = questions
-        st.session_state.test_name = test_secimi
-        st.session_state.answers = {}
-        st.session_state.report = None  # Rapor sıfırlansın
-        st.rerun()
-
-# Sorular gösterimi
-if "questions" in st.session_state:
-    st.markdown(f"## 📋 {st.session_state.test_name}")
-    st.markdown("Lütfen tüm soruları dikkatle cevaplayın. Tüm sorular zorunludur.")
-
-    questions = st.session_state.questions
-    answers = st.session_state.get("answers", {})
-
-    for q in questions:
-        q_id = q["id"]
-        q_text = q["text"]
-        reverse = q.get("reverse_scored", False)
+        angles = np.linspace(0, 2*np.pi, len(labels), endpoint=False).tolist()
         
-        st.markdown(f"**Soru {q_id}:** {q_text}")
-        if reverse:
-            st.caption("⚠️ Bu madde ters puanlanıyor (dikkatli cevaplayın)")
+        # Grafiği kapatmak için ilk değeri sona ekle
+        stats = np.concatenate((stats,[stats[0]]))
+        angles += angles[:1]
+        
+        fig, ax = plt.subplots(figsize=(6, 6), subplot_kw=dict(polar=True))
+        
+        ax.fill(angles, stats, color='#3B82F6', alpha=0.25)
+        ax.plot(angles, stats, color='#2563EB', linewidth=2)
+        
+        # Etiketleri ayarla
+        ax.set_yticklabels([])
+        ax.set_xticks(angles[:-1])
+        ax.set_xticklabels(labels, fontsize=9, color="#475569")
+        
+        ax.set_title(title, y=1.1, fontsize=14, color="#1E293B", fontweight="bold")
+        
+        # Arka planı temizle
+        ax.spines['polar'].set_visible(False)
+        ax.grid(color='#E2E8F0', linestyle='--')
+        
+        return fig
+    except Exception as e:
+        st.error(f"Grafik hatası: {e}")
+        return None
 
-        cevap = st.radio(
-            "Seçiminiz:",
-            options=[
-                "Kesinlikle Katılmıyorum (1)",
-                "Katılmıyorum (2)",
-                "Kararsızım (3)",
-                "Katılıyorum (4)",
-                "Kesinlikle Katılıyorum (5)"
-            ],
-            index=None,  # İşaretsiz başlasın
-            key=f"q_{q_id}"
+# --- 5. ANA UYGULAMA AKIŞI ---
+
+# Başlık Alanı
+st.markdown('<div class="main-header">Balaban Neuro-Psych Analiz Merkezi</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-header">Yapay Zeka Destekli, Klinik Derinlikte, Herkes İçin Anlaşılır.</div>', unsafe_allow_html=True)
+
+# Session State Başlatma
+if "current_stage" not in st.session_state:
+    st.session_state.current_stage = "selection" # selection -> testing -> report
+if "selected_test" not in st.session_state:
+    st.session_state.selected_test = None
+if "questions" not in st.session_state:
+    st.session_state.questions = []
+if "answers" not in st.session_state:
+    st.session_state.answers = {}
+
+# AŞAMA 1: TEST SEÇİMİ
+if st.session_state.current_stage == "selection":
+    col1, col2 = st.columns([1, 2])
+    
+    with col1:
+        st.markdown("### 📋 Test Envanteri")
+        selected = st.radio(
+            "Lütfen uygulamak istediğiniz testi seçin:",
+            list(TESTLER.keys()),
+            label_visibility="collapsed"
         )
+    
+    with col2:
+        st.info(f"**{selected}**\n\n{TESTLER[selected]}")
+        st.markdown("---")
+        st.markdown("""
+        **Süreç Nasıl İşler?**
+        1. **Hazırlık:** Yapay zeka, seçilen konuda akademik literatürü tarayarak size özel 20 adet soru hazırlar.
+        2. **Uygulama:** Sorular, herkesin anlayabileceği kadar sade bir dille sorulur.
+        3. **Analiz:** Cevaplarınız, klinik psikoloji uzmanı seviyesinde bir yapay zeka tarafından analiz edilir.
+        4. **Rapor:** Sonuçlar, derinlemesine içgörüler ve grafiklerle sunulur.
+        """)
         
-        if cevap:
-            value = int(cevap.split("(")[1][0])
-            answers[q_id] = {"answer": value, "reverse": reverse}
-
-    st.session_state.answers = answers
-
-    if st.button("📊 Çok Detaylı Raporu Göster", type="primary"):
-        if len(answers) < len(questions):
-            st.warning("⚠️ Lütfen tüm soruları cevaplayın!")
-        else:
-            with st.spinner("Dünyanın en derin psikolojik analizi hazırlanıyor... (20-40 saniye sürebilir)"):
-                answers_list = [
-                    {"id": q_id, "answer": info["answer"]} 
-                    for q_id, info in answers.items()
-                ]
+        if st.button("🚀 Analizi Başlat", type="primary"):
+            st.session_state.selected_test = selected
+            
+            with st.spinner("Nöro-psikolojik soru seti oluşturuluyor... Lütfen bekleyin."):
+                # --- PROMPT MÜHENDİSLİĞİ: SORU ÜRETİMİ ---
+                # Hedef: Akademik derinlikte construct (yapı), İlkokul seviyesinde dil.
+                system_prompt = """
+                Sen dünyanın en iyi psikometristisin. Görevin, belirtilen psikolojik test için soru seti hazırlamaktır.
                 
-                analiz_prompt = f"""
-                Sen dünyanın en iyi klinik psikoloğu ve akademik araştırmacısısın. {st.session_state.test_name} sonuçlarını inanılmaz derinlikte analiz et.
-                Cevaplar: {json.dumps(answers_list, ensure_ascii=False)}
-                
-                Rapor KESİNLİKLE şu JSON formatında olsun (HER ALAN ZORUNLU ve dolu olsun):
-                {{
-                  "summary": "Percentile'li özet metin",
-                  "scientific_explanation": "Referanslı bilimsel açıklama",
-                  "detailed_analysis": "Katmanlı detaylı analiz",
-                  "strengths": ["Güçlü yön 1", "Güçlü yön 2", ...],
-                  "improvements": ["Geliştirilebilir yön 1", "Geliştirilebilir yön 2", ...],
-                  "recommendations": ["Adım adım tavsiye 1", "Adım adım tavsiye 2", ...],
-                  "graphics": {{
-                    "bar": {{"labels": ["Boyut1", "Boyut2", "..."], "data": [85, 70, ...]}},
-                    "radar": {{"labels": ["Boyut1", "Boyut2", "..."], "data": [85, 70, ...]}},
-                    "pie": {{"labels": ["Güçlü", "Orta", "Geliştirilebilir"], "data": [60, 30, 10]}}
-                  }},
-                  "disclaimer": "Bu test eğlence ve kendini tanıma amaçlıdır. Profesyonel tanı yerine geçmez."
-                }}
-                Akıcı, olumlu ve motive edici Türkçe yaz. JSON dışında hiçbir şey yazma!
+                KURALLAR:
+                1. **AKADEMİK GEÇERLİLİK:** Sorular, seçilen testin bilimsel literatürdeki (örn: Big Five için Costa & McCrae) alt boyutlarını tam olarak ölçmelidir.
+                2. **DİL SEVİYESİ (ÇOK ÖNEMLİ):** Soruları bir ilkokul 4. sınıf öğrencisinin bile yanlış anlamadan, tek seferde anlayabileceği kadar YALIN, BASİT ve NET bir Türkçe ile sor.
+                   - Asla akademik terim (örn: "bilişsel çarpıtma", "dürtüsellik") kullanma. Bunun yerine günlük hayattan örnekler ver.
+                   - Örnek: "Dürtüselliğim yüksektir" DEME -> "Sıramı beklerken çok zorlanırım" DE.
+                   - Devrik cümle kurma. Dolaylı anlatım yapma.
+                3. **YÖNLENDİRME YOK:** Soru, "iyi" veya "kötü" cevabı hissettirmemeli. Nötr olmalı.
+                4. **TERS MADDELER:** Soruların %30'u ters puanlanmalı (reverse_scored: true).
+                5. **FORMAT:** Sadece ve sadece belirtilen JSON formatında çıktı ver.
                 """
+                
+                user_prompt = f"""
+                Test Konusu: {selected}
+                Soru Sayısı: 20
+                
+                İstenen JSON Formatı:
+                {{
+                    "questions": [
+                        {{"id": 1, "text": "Buraya çok basit, anlaşılır soru metni gelecek", "category": "Alt Boyut Adı", "reverse_scored": false}},
+                        ...
+                    ]
+                }}
+                """
+                
                 try:
-                    response2 = client.chat.completions.create(
-                        model="grok-4",
+                    response = client.chat.completions.create(
+                        model="grok-2-latest", # En son model
                         messages=[
-                            {"role": "system", "content": "Sadece tam JSON üret, ekstra metin yok."},
-                            {"role": "user", "content": analiz_prompt}
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": user_prompt}
                         ],
-                        temperature=0.7,
+                        temperature=0.4, # Yaratıcılık düşük, tutarlılık orta
                         response_format={"type": "json_object"}
                     )
-                    report = json.loads(response2.choices[0].message.content)
-                    st.session_state.report = report  # Raporu kaydet (kaybolmasın!)
+                    
+                    raw_json = clean_json_string(response.choices[0].message.content)
+                    data = json.loads(raw_json)
+                    st.session_state.questions = data["questions"]
+                    st.session_state.answers = {} # Cevapları sıfırla
+                    st.session_state.current_stage = "testing"
+                    st.rerun()
+                    
                 except Exception as e:
-                    st.error(f"Rapor üretimi hatası: {e}")
-                    st.stop()
+                    st.error(f"Soru seti oluşturulurken bir hata oluştu: {e}")
 
-            st.rerun()  # Raporu göstermek için rerun
-
-# Rapor gösterimi (kalıcı olsun)
-if "report" in st.session_state and st.session_state.report:
-    report = st.session_state.report
-    test_name = st.session_state.test_name
+# AŞAMA 2: TEST UYGULAMA
+elif st.session_state.current_stage == "testing":
+    st.progress(len(st.session_state.answers) / len(st.session_state.questions))
     
-    st.markdown(f"# 📊 {test_name} – İnanılmaz Derin Rapor")
+    st.markdown(f"### 📝 {st.session_state.selected_test}")
+    st.caption("Aşağıdaki ifadeleri sizi ne kadar iyi tanımladığına göre derecelendirin.")
     
-    st.markdown(f"**Özet:** {report.get('summary', '')}")
-    st.markdown(f"**Bilimsel Açıklama:**\n{report.get('scientific_explanation', '')}")
-    st.markdown(f"**Detaylı Analiz:**\n{report.get('detailed_analysis', '')}")
+    questions = st.session_state.questions
     
-    st.markdown("### 💪 Güçlü Yönler")
-    for s in report.get("strengths", []):
-        st.markdown(f"- {s}")
-    
-    st.markdown("### 🔧 Geliştirilebilir Yönler")
-    for i in report.get("improvements", []):
-        st.markdown(f"- {i}")
-    
-    st.markdown("### 🎯 Kişiselleştirilmiş Tavsiyeler")
-    for r in report.get("recommendations", []):
-        st.markdown(f"- {r}")
-    
-    # Grafikler
-    if "graphics" in report:
-        g = report["graphics"]
-        
-        col1, col2, col3 = st.columns(3)
-        
-        if "bar" in g:
-            fig1, ax1 = plt.subplots(figsize=(8, 5))
-            ax1.bar(g["bar"]["labels"], g["bar"]["data"], color='skyblue')
-            ax1.set_title("Boyut Puanları")
-            ax1.set_ylabel("Puan (%)")
-            plt.xticks(rotation=45)
-            col1.pyplot(fig1)
-        
-        if "radar" in g:
-            labels = g["radar"]["labels"]
-            data = g["radar"]["data"]
-            angles = [n / float(len(labels)) * 2 * 3.14159 for n in range(len(labels))]
-            angles += angles[:1]
-            data += data[:1]
+    # Form kullanımı: Her seçimde sayfa yenilenmesini engeller
+    with st.form("test_form"):
+        for q in questions:
+            st.markdown(f"""
+            <div class="question-card">
+                <h4 style="margin:0; color:#1E293B;">{q['id']}. {q['text']}</h4>
+            </div>
+            """, unsafe_allow_html=True)
             
-            fig2, ax2 = plt.subplots(figsize=(7, 7), subplot_kw=dict(polar=True))
-            ax2.plot(angles, data, 'o-', linewidth=3, color='purple')
-            ax2.fill(angles, data, alpha=0.3, color='purple')
-            ax2.set_xticks(angles[:-1])
-            ax2.set_xticklabels(labels)
-            ax2.set_title("Profil Radar Grafiği")
-            col2.pyplot(fig2)
+            # Radyo butonlarını yatay ve temiz göster
+            col_opts = st.columns(5)
+            options = [
+                ("1", "Hiç Katılmıyorum"),
+                ("2", "Katılmıyorum"),
+                ("3", "Kararsızım"),
+                ("4", "Katılıyorum"),
+                ("5", "Tamamen Katılıyorum")
+            ]
+            
+            # Benzersiz key kullanarak cevapları al
+            choice = st.radio(
+                f"Soru {q['id']} cevabı:",
+                options,
+                format_func=lambda x: x[1], # Sadece metni göster
+                key=f"q_{q['id']}",
+                horizontal=True,
+                label_visibility="collapsed"
+            )
+            
+            # Cevabı kaydet (1-5 arası int)
+            st.session_state.answers[q['id']] = {
+                "score": int(choice[0]),
+                "text": q['text'],
+                "category": q.get('category', 'Genel'),
+                "reverse": q.get('reverse_scored', False)
+            }
+            st.markdown("---")
+
+        submitted = st.form_submit_button("✅ Testi Bitir ve Analiz Et")
         
-        if "pie" in g:
-            fig3, ax3 = plt.subplots(figsize=(7, 7))
-            ax3.pie(g["pie"]["data"], labels=g["pie"]["labels"], autopct='%1.1f%%', startangle=90)
-            ax3.set_title("Genel Dağılım")
-            col3.pyplot(fig3)
+        if submitted:
+            st.session_state.current_stage = "report"
+            st.rerun()
+
+# AŞAMA 3: RAPOR VE ANALİZ
+elif st.session_state.current_stage == "report":
+    st.markdown("## 📊 Analiz Raporunuz")
     
-    st.info(report.get("disclaimer", "Bu test profesyonel tanı yerine geçmez."))
-    
-    st.success("🎉 Raporunuz hazır! Kendinizi daha iyi tanımaya bir adım daha yaklaştınız.")
-    
-    if st.button("🔄 Yeni Test Yap"):
-        st.session_state.clear()
-        st.rerun()
+    with st.spinner("Verileriniz uzman sistem tarafından işleniyor... Milyarlarca parametre taranıyor..."):
+        # --- PROMPT MÜHENDİSLİĞİ: RAPORLAMA ---
+        # Hedef: Akademik/Klinik derinlikte analiz, Lise mezunu anlaşılırlığında dil.
+        
+        answers_json = json.dumps(st.session_state.answers, ensure_ascii=False)
+        
+        system_prompt_report = """
+        Sen dünyanın en saygın klinik psikologlarından birisin (Örn: Irvin Yalom veya Carl Rogers tarzında).
+        Elinizdeki verileri analiz ederek, danışanınıza hayatını değiştirecek derinlikte bir rapor yazacaksın.
+        
+        HEDEF KİTLE VE DİL:
+        - Rapor, bir lise mezununun rahatça okuyup anlayabileceği akıcılıkta olmalı.
+        - Asla "Duygulanım küntlüğü", "Bilişsel disonans" gibi ağır terimler kullanma. Kullanacaksan da parantez içinde halk diliyle açıkla.
+        - Tonun: Destekleyici, profesyonel, bilge ve içten olsun.
+        
+        İÇERİK DERİNLİĞİ:
+        - Sadece puanları söyleyip geçme. (Örn: "Dışadönüklüğünüz 5 üzerinden 4" DEME.)
+        - Bu puanın onun hayatına etkisini, potansiyel kör noktalarını, ilişkilerine yansımasını ANALİZ ET.
+        - Satır aralarını oku. Çelişkili cevaplar varsa (ters maddeler) bunları yorumla.
+        
+        ÇIKTI FORMATI (JSON):
+        Aşağıdaki JSON yapısında çıktı ver:
+        {
+            "executive_summary": "Yöneticiler için özet gibi, kişinin genel profilinin 2-3 cümlelik özü.",
+            "deep_analysis": "Her bir alt boyut veya kategori için detaylı, derinlemesine paragraflar. Başlıklar HTML formatında olsun (<h3>Başlık</h3> gibi).",
+            "hidden_patterns": "Kişinin belki de farkında olmadığı, cevaplardaki gizli örüntüler veya riskler.",
+            "action_plan": [
+                "Somut, uygulanabilir öneri 1",
+                "Somut, uygulanabilir öneri 2",
+                "Somut, uygulanabilir öneri 3"
+            ],
+            "chart_data": {
+                "labels": ["Kategori1", "Kategori2", "Kategori3"...],
+                "scores": [85, 40, 60...] (100 üzerinden normalize edilmiş puanlar)
+            }
+        }
+        """
+        
+        try:
+            response_report = client.chat.completions.create(
+                model="grok-2-latest",
+                messages=[
+                    {"role": "system", "content": system_prompt_report},
+                    {"role": "user", "content": f"Test: {st.session_state.selected_test}\nCevaplar: {answers_json}"}
+                ],
+                temperature=0.6,
+                response_format={"type": "json_object"}
+            )
+            
+            raw_report = clean_json_string(response_report.choices[0].message.content)
+            report_data = json.loads(raw_report)
+            
+            # 1. Yönetici Özeti
+            st.markdown('<div class="report-section">', unsafe_allow_html=True)
+            st.markdown("### 🎯 Genel Bakış")
+            st.info(report_data["executive_summary"])
+            st.markdown('</div>', unsafe_allow_html=True)
+            
+            col_graph, col_text = st.columns([1, 1])
+            
+            # 2. Grafiksel Analiz
+            with col_graph:
+                st.markdown("### 🕸️ Profil Haritası")
+                if "chart_data" in report_data:
+                    chart_fig = create_radar_chart(
+                        report_data["chart_data"]["labels"],
+                        report_data["chart_data"]["scores"],
+                        "Yetkinlik Dağılımı (%)"
+                    )
+                    if chart_fig:
+                        st.pyplot(chart_fig)
+            
+            # 3. Gizli Örüntüler (Farkındalık)
+            with col_text:
+                st.markdown("### 🔍 Farkındalık Alanları")
+                st.write(report_data.get("hidden_patterns", "Analiz ediliyor..."))
+                
+                st.markdown("### 🌱 Gelişim Adımları")
+                for item in report_data.get("action_plan", []):
+                    st.success(f"📌 {item}")
+
+            # 4. Derinlemesine Analiz (Uzun Metin)
+            st.markdown("---")
+            st.markdown("### 🧠 Detaylı Klinik Analiz")
+            st.markdown('<div class="report-section">', unsafe_allow_html=True)
+            st.markdown(report_data["deep_analysis"], unsafe_allow_html=True)
+            st.markdown('</div>', unsafe_allow_html=True)
+            
+            st.warning("⚠️ YASAL UYARI: Bu rapor yapay zeka tarafından eğitim ve farkındalık amaçlı üretilmiştir. Tıbbi tanı veya tedavi yerine geçmez. Lütfen profesyonel destek alınız.")
+            
+            if st.button("🔄 Yeni Test Başlat"):
+                st.session_state.current_stage = "selection"
+                st.session_state.answers = {}
+                st.session_state.questions = []
+                st.rerun()
+
+        except Exception as e:
+            st.error(f"Rapor oluşturulurken hata: {e}")
