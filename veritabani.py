@@ -248,60 +248,155 @@ def aile_ozetleri_getir(ogrenci_id=None, ogretmen_id=None):
     return _execute_with_retry(_op)
 
 
-# --- Supabase Tablo Oluşturma SQL'leri (referans) ---
-TABLO_SQL = """
--- Öğretmenler tablosu
-CREATE TABLE IF NOT EXISTS ogretmenler (
-    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    ad TEXT NOT NULL,
-    soyad TEXT NOT NULL,
-    kullanici_adi TEXT UNIQUE NOT NULL,
-    sifre_hash TEXT NOT NULL,
-    okul TEXT,
-    kayit_tarihi TIMESTAMPTZ DEFAULT NOW()
-);
+# --- Otomatik Tablo Oluşturma ---
 
--- Öğrenciler tablosu
-CREATE TABLE IF NOT EXISTS ogrenciler (
-    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    ad TEXT NOT NULL,
-    soyad TEXT NOT NULL,
-    sinif TEXT,
-    okul TEXT,
-    ogretmen_id UUID REFERENCES ogretmenler(id),
-    kayit_tarihi TIMESTAMPTZ DEFAULT NOW()
-);
+_TABLO_SQLLERI = [
+    # 1. ogretmenler
+    """
+    CREATE TABLE IF NOT EXISTS ogretmenler (
+        id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+        ad TEXT NOT NULL,
+        soyad TEXT NOT NULL,
+        kullanici_adi TEXT UNIQUE NOT NULL,
+        sifre_hash TEXT NOT NULL,
+        okul TEXT,
+        kayit_tarihi TIMESTAMPTZ DEFAULT NOW()
+    );
+    """,
+    # 2. ogrenciler
+    """
+    CREATE TABLE IF NOT EXISTS ogrenciler (
+        id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+        ad TEXT NOT NULL,
+        soyad TEXT NOT NULL,
+        sinif TEXT,
+        okul TEXT,
+        ogretmen_id UUID REFERENCES ogretmenler(id),
+        kayit_tarihi TIMESTAMPTZ DEFAULT NOW()
+    );
+    """,
+    # 3. test_sonuclari
+    """
+    CREATE TABLE IF NOT EXISTS test_sonuclari (
+        id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+        ogrenci_id UUID REFERENCES ogrenciler(id) ON DELETE CASCADE,
+        test_tipi TEXT NOT NULL,
+        cevaplar JSONB,
+        puanlar JSONB,
+        sonuc_ozeti JSONB,
+        tarih TIMESTAMPTZ DEFAULT NOW()
+    );
+    """,
+    # 4. ai_analizler
+    """
+    CREATE TABLE IF NOT EXISTS ai_analizler (
+        id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+        ogrenci_id UUID REFERENCES ogrenciler(id) ON DELETE CASCADE,
+        ogretmen_id UUID REFERENCES ogretmenler(id),
+        test_tipleri JSONB,
+        analiz_metni TEXT,
+        analiz_tipi TEXT DEFAULT 'tekli',
+        tarih TIMESTAMPTZ DEFAULT NOW()
+    );
+    """,
+    # 5. aile_ozetleri
+    """
+    CREATE TABLE IF NOT EXISTS aile_ozetleri (
+        id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+        ogrenci_id UUID REFERENCES ogrenciler(id) ON DELETE CASCADE,
+        ogretmen_id UUID REFERENCES ogretmenler(id),
+        secilen_basliklar JSONB,
+        ozet_metni TEXT,
+        test_tipleri JSONB,
+        olusturma_tarihi TIMESTAMPTZ DEFAULT NOW()
+    );
+    """,
+]
 
--- Test sonuçları tablosu
-CREATE TABLE IF NOT EXISTS test_sonuclari (
-    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    ogrenci_id UUID REFERENCES ogrenciler(id) ON DELETE CASCADE,
-    test_tipi TEXT NOT NULL,
-    cevaplar JSONB,
-    puanlar JSONB,
-    sonuc_ozeti JSONB,
-    tarih TIMESTAMPTZ DEFAULT NOW()
-);
+_INDEKS_SQLLERI = [
+    "CREATE INDEX IF NOT EXISTS idx_ogrenciler_ogretmen ON ogrenciler(ogretmen_id);",
+    "CREATE INDEX IF NOT EXISTS idx_test_sonuclari_ogrenci ON test_sonuclari(ogrenci_id);",
+    "CREATE INDEX IF NOT EXISTS idx_test_sonuclari_tip ON test_sonuclari(test_tipi);",
+    "CREATE INDEX IF NOT EXISTS idx_ai_analizler_ogrenci ON ai_analizler(ogrenci_id);",
+    "CREATE INDEX IF NOT EXISTS idx_aile_ozetleri_ogrenci ON aile_ozetleri(ogrenci_id);",
+    "CREATE INDEX IF NOT EXISTS idx_aile_ozetleri_ogretmen ON aile_ozetleri(ogretmen_id);",
+]
 
--- AI analiz sonuçları tablosu
-CREATE TABLE IF NOT EXISTS ai_analizler (
-    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    ogrenci_id UUID REFERENCES ogrenciler(id) ON DELETE CASCADE,
-    ogretmen_id UUID REFERENCES ogretmenler(id),
-    test_tipleri JSONB,
-    analiz_metni TEXT,
-    analiz_tipi TEXT DEFAULT 'tekli',
-    tarih TIMESTAMPTZ DEFAULT NOW()
-);
-
--- Aile bilgilendirme özetleri tablosu
-CREATE TABLE IF NOT EXISTS aile_ozetleri (
-    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    ogrenci_id UUID REFERENCES ogrenciler(id) ON DELETE CASCADE,
-    ogretmen_id UUID REFERENCES ogretmenler(id),
-    secilen_basliklar JSONB,
-    ozet_metni TEXT,
-    test_tipleri JSONB,
-    olusturma_tarihi TIMESTAMPTZ DEFAULT NOW()
-);
+_DEMO_OGRETMEN_SQL = """
+    INSERT INTO ogretmenler (ad, soyad, kullanici_adi, sifre_hash, okul)
+    VALUES ('Demo', 'Öğretmen', 'demo', '{hash}', 'Demo Okul')
+    ON CONFLICT (kullanici_adi) DO NOTHING;
 """
+
+
+def _get_database_url():
+    """PostgreSQL bağlantı string'ini al"""
+    if "DATABASE_URL" in st.secrets:
+        return st.secrets["DATABASE_URL"]
+    from config import DATABASE_URL
+    return DATABASE_URL
+
+
+def tablolari_olustur():
+    """Veritabanı tablolarını otomatik oluştur. İlk çalıştırmada çağrılır."""
+    db_url = _get_database_url()
+    if not db_url:
+        return False, "DATABASE_URL tanımlı değil. .env veya Streamlit secrets'a ekleyin."
+
+    try:
+        import psycopg2
+    except ImportError:
+        return False, "psycopg2 paketi yüklü değil. requirements.txt'e 'psycopg2-binary' ekleyin."
+
+    conn = None
+    try:
+        conn = psycopg2.connect(db_url, connect_timeout=10)
+        conn.autocommit = True
+        cur = conn.cursor()
+
+        olusturulan = []
+        for sql in _TABLO_SQLLERI:
+            cur.execute(sql)
+            # Tablo adını SQL'den çıkar
+            tablo_adi = sql.split("EXISTS")[1].split("(")[0].strip()
+            olusturulan.append(tablo_adi)
+
+        # İndeksler
+        for sql in _INDEKS_SQLLERI:
+            cur.execute(sql)
+
+        # Demo öğretmen
+        demo_hash = _hash_sifre("demo123")
+        cur.execute(_DEMO_OGRETMEN_SQL.format(hash=demo_hash))
+
+        cur.close()
+        conn.close()
+        return True, f"Tablolar oluşturuldu: {', '.join(olusturulan)}"
+
+    except Exception as e:
+        if conn:
+            conn.close()
+        return False, f"Veritabanı hatası: {e}"
+
+
+def tablolar_mevcut_mu():
+    """Tabloların zaten var olup olmadığını kontrol et"""
+    db_url = _get_database_url()
+    if not db_url:
+        return None  # Kontrol edilemedi
+
+    try:
+        import psycopg2
+        conn = psycopg2.connect(db_url, connect_timeout=10)
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT table_name FROM information_schema.tables
+            WHERE table_schema = 'public'
+            AND table_name IN ('ogretmenler', 'ogrenciler', 'test_sonuclari', 'ai_analizler', 'aile_ozetleri')
+        """)
+        mevcut = [row[0] for row in cur.fetchall()]
+        cur.close()
+        conn.close()
+        return mevcut
+    except Exception:
+        return None

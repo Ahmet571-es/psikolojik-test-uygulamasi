@@ -22,6 +22,24 @@ st.set_page_config(
 
 uygula_genel_stil()
 
+# --- Veritabanı Otomatik Kurulum ---
+if "db_kurulum_yapildi" not in st.session_state:
+    st.session_state["db_kurulum_yapildi"] = False
+
+if not st.session_state["db_kurulum_yapildi"]:
+    try:
+        from veritabani import tablolar_mevcut_mu, tablolari_olustur
+        mevcut = tablolar_mevcut_mu()
+        if mevcut is not None and len(mevcut) < 5:
+            basarili, mesaj = tablolari_olustur()
+            if basarili:
+                st.session_state["db_kurulum_yapildi"] = True
+            # İlk çalıştırmada sessizce kurulum yap
+        elif mevcut is not None:
+            st.session_state["db_kurulum_yapildi"] = True
+    except Exception:
+        pass  # DB yoksa sessizce devam et
+
 # --- Session State Başlatma ---
 _default_states = {
     "sayfa": "ana_sayfa",
@@ -584,8 +602,8 @@ def ogretmen_paneli_sayfasi():
     ogretmen = st.session_state["ogretmen"]
     st.success(f"Giriş yapıldı: {ogretmen.get('ad', '')} {ogretmen.get('soyad', '')}")
 
-    tab1, tab2, tab3, tab4 = st.tabs([
-        "Öğrenci Yönetimi", "Test Sonuçları", "AI Analiz", "Toplu İndirme"
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "Öğrenci Yönetimi", "Test Sonuçları", "AI Analiz", "Toplu İndirme", "Veritabanı Kurulumu"
     ])
 
     with tab1:
@@ -602,11 +620,53 @@ def ogretmen_paneli_sayfasi():
         from ogretmen_paneli import toplu_export
         toplu_export()
 
+    with tab5:
+        _veritabani_kurulum_paneli()
+
     st.markdown("---")
     if st.button("Çıkış Yap"):
         st.session_state["ogretmen_giris"] = False
         st.session_state["ogretmen"] = None
         st.rerun()
+
+
+def _veritabani_kurulum_paneli():
+    """Veritabanı kurulum ve durum paneli"""
+    st.markdown("### Veritabanı Kurulumu")
+
+    from veritabani import tablolar_mevcut_mu, tablolari_olustur
+
+    # Mevcut durum kontrolü
+    mevcut = tablolar_mevcut_mu()
+    beklenen = ["ogretmenler", "ogrenciler", "test_sonuclari", "ai_analizler", "aile_ozetleri"]
+
+    if mevcut is None:
+        st.warning("Veritabanına bağlanılamadı. DATABASE_URL ayarını kontrol edin.")
+        st.code("DATABASE_URL=postgresql://user:pass@host:5432/postgres", language="bash")
+    else:
+        st.markdown("#### Tablo Durumu")
+        for tablo in beklenen:
+            if tablo in mevcut:
+                st.write(f"  {tablo}")
+            else:
+                st.write(f"  {tablo} (eksik)")
+
+        eksik = [t for t in beklenen if t not in mevcut]
+        if not eksik:
+            st.success(f"Tüm tablolar mevcut ({len(mevcut)}/5)")
+        else:
+            st.warning(f"{len(eksik)} tablo eksik: {', '.join(eksik)}")
+
+    # Kurulum butonu
+    if st.button("Tabloları Oluştur / Güncelle", type="primary"):
+        with st.spinner("Tablolar oluşturuluyor..."):
+            basarili, mesaj = tablolari_olustur()
+            if basarili:
+                st.success(mesaj)
+                st.session_state["db_kurulum_yapildi"] = True
+                st.rerun()
+            else:
+                st.error(mesaj)
 
 
 def _ogretmen_test_sonuclari():

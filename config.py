@@ -18,6 +18,7 @@ CLAUDE_MODEL = "claude-sonnet-4-20250514"
 
 # Supabase Yapılandırması
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
+DATABASE_URL = os.getenv("DATABASE_URL", "")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
 
 # Test Modülleri
